@@ -206,9 +206,11 @@ const getAllUsers = async (poolId: string, accumedUsers = [], includeCustomAttrs
 };
 
 let cachedUserPoolIds = []
+let cachedIdentityPoolIds = []
+
 
 const listIdentityPools = async () => {
-  if (cachedUserPoolIds.length === 0) {
+  if (cachedIdentityPoolIds.length === 0) {
     const result = await pagedAWSCall<CognitoIdentity.Types.ListIdentityPoolsResponse, any, any>(
       async (params: CognitoIdentity.Types.ListIdentityPoolsInput, nextToken: PaginationKeyType) => {
         // console.log('listUserPool.cognito.listUserPools', [{ params, NextToken: nextToken }]);
@@ -224,13 +226,14 @@ const listIdentityPools = async () => {
       (response) => response.IdentityPools,
       async (response) => {
         return response.NextToken;
+        // return ''
       }
     );
 
-    cachedUserPoolIds.push(...result);
+    cachedIdentityPoolIds.push(...result);
   }
 
-  return cachedUserPoolIds;
+  return cachedIdentityPoolIds;
 }
 
 
@@ -257,6 +260,7 @@ const listUserPools = async () => {
       (response) => response.UserPools,
       async (response) => {
         return response.NextToken;
+        // return ''
       }
     );
 
@@ -272,21 +276,20 @@ const main = async () => {
 
   for (const pool of pools) {
     let poolId = pool.Id
+    let poolName = pool.Name
 
     try {
       const poolUsers = await getAllUsers(poolId);
       // console.log(poolUsers[0].UserStatus)
       pool.poolUsers = poolUsers;
-      pool.isPrepareToDelete = poolUsers?.length === 0 || poolUsers?.every((poolUser => poolUser?.UserStatus === 'FORCE_CHANGE_PASSWORD'))
-      console.log(`Found ${poolUsers.length} users in pool ${poolId}.`);
+      let isAllForceChangePassword = poolUsers > 0 && poolUsers?.every((poolUser => poolUser?.UserStatus === 'FORCE_CHANGE_PASSWORD'))
+      pool.isPrepareToDelete = poolUsers?.length === 0 || isAllForceChangePassword
+      console.log(`Found ${poolUsers.length} users in pool ${poolId} ${poolName} isAllForceChangePassword=${isAllForceChangePassword}`,);
     } catch (error) {
-      console.error(`Error getting users from pool ${poolId}`);
+      console.error(`Error getting users from pool ${poolId} ${poolName}`);
       console.error(error);
     }
   }
-  // console.log(pools[0]?.Id)
-  // let poolId = 'eu-central-1_4YBRMDPVy'
-
 
   const dataFolder = './data';
   const dataSubfolder = `${dataFolder}/${region}`;
@@ -307,28 +310,29 @@ const main = async () => {
   let realPools = pools.filter(pool => !pool?.isPrepareToDelete);
   // let realPools = []
   const identityPools = await listIdentityPools() || []
-  identityPools.forEach(async identityPool => {
-    console.log(identityPool);
-    let response = await describeIdentityPool(cognitoIdentity, identityPool?.IdentityPoolId);
-    const isValidProviderNameUserPool = (item): boolean => {
-      if (item?.CognitoIdentityProviders.length === 1) {
-        const providerName: string = item.CognitoIdentityProviders[0]?.ProviderName
-        let userPoolMatchs = realPools.filter((pool) => providerName.endsWith(pool.Id))
-        if (providerName?.startsWith("cognito-idp") && userPoolMatchs?.length > 0) {
-          identityPool.userPoolMatchs = userPoolMatchs
-          return true
-        }
-      } else {
-        console.log("CognitoIdentityProviders > 1" + identityPool?.IdentityPoolId)
+  console.log(identityPools[0])
+
+  const isValidProviderNameUserPool = (item): boolean => {
+    if (item?.CognitoIdentityProviders.length === 1) {
+      const providerName: string = item.CognitoIdentityProviders[0]?.ProviderName
+      let userPoolMatchs = realPools.filter((pool) => providerName?.endsWith('/' + pool.Id))
+      if (providerName?.startsWith("cognito-idp") && userPoolMatchs?.length > 0) {
+        item.userPoolMatchs = userPoolMatchs
         return true
       }
-
+      console.log(`Delete ${item.IdentityPoolId} ${item.IdentityPoolName} because ${providerName} not exists`);
       return false
+    } else {
+      console.debug("CognitoIdentityProviders > 1" + item?.IdentityPoolId)
+      return true
     }
+  }
+
+  for (const identityPool of identityPools) {
+    let response = await describeIdentityPool(cognitoIdentity, identityPool?.IdentityPoolId);
+
     identityPool.isPrepareToDelete = response?.CognitoIdentityProviders?.length === 0 || !isValidProviderNameUserPool(response)
-    console.log(response)
-    return true
-  })
+  }
 
   jsonfile.writeFileSync(`${dataSubfolder}/id-deletes.json`, identityPools.filter(pool => pool?.isPrepareToDelete), { spaces: 2 });
   jsonfile.writeFileSync(`${dataSubfolder}/id-keeps.json`, identityPools.filter(pool => !pool?.isPrepareToDelete), { spaces: 2 });
