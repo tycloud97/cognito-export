@@ -315,14 +315,15 @@ const main = async () => {
 
   // jsonfile.writeFileSync(`${dataSubfolder}/all-pools.json`, pools, { spaces: 2 });
 
-  jsonfile.writeFileSync(`${dataSubfolder}/delete-pools.json`, pools.filter(pool => pool?.isPrepareToDelete), { spaces: 2 });
+  const deletePools = pools.filter(pool => pool?.isPrepareToDelete)
+  console.log('deletePools = ' + deletePools.length)
+  jsonfile.writeFileSync(`${dataSubfolder}/delete-pools.json`, deletePools, { spaces: 2 });
 
 
   let realPools = pools.filter(pool => !pool?.isPrepareToDelete);
-
+  console.log('keepPools = ' + realPools?.length)
   jsonfile.writeFileSync(`${dataSubfolder}/keep-pools.json`, realPools, { spaces: 2 });
 
-  // let realPools = []
   const identityPools = await listIdentityPools() || []
   console.log(identityPools[0])
 
@@ -348,18 +349,20 @@ const main = async () => {
         identityPool.reasonDelete = `ProviderName ${providerName} not match any user pool`;
       }
     } else {
-      console.debug("CognitoIdentityProviders > 1" + response)
+      console.debug("CognitoIdentityProviders > 1" + JSON.stringify(response))
     }
-
-
-
-
   }
 
-  jsonfile.writeFileSync(`${dataSubfolder}/delete-identity-pools.json`, identityPools.filter(pool => pool?.isPrepareToDelete), { spaces: 2 });
-  jsonfile.writeFileSync(`${dataSubfolder}/keep-identity-pools.json`, identityPools.filter(pool => !pool?.isPrepareToDelete), { spaces: 2 });
+  console.log("totalIdentityPools = " + identityPools.length)
 
-  console.log(identityPools?.length)
+  const deleteIdentityPools = identityPools.filter(pool => pool?.isPrepareToDelete);
+  jsonfile.writeFileSync(`${dataSubfolder}/delete-identity-pools.json`, deleteIdentityPools, { spaces: 2 });
+  console.log('deleteIdentityPools = ' + deleteIdentityPools?.length)
+
+  const keepIdentityPools = identityPools.filter(pool => !pool?.isPrepareToDelete);
+  jsonfile.writeFileSync(`${dataSubfolder}/keep-identity-pools.json`, keepIdentityPools, { spaces: 2 });
+  console.log('keepIdentityPools = ' + keepIdentityPools?.length)
+
 
 }
 (async () => {
