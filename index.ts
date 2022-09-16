@@ -273,6 +273,7 @@ const listUserPools = async () => {
 const main = async () => {
   // List user pools
   const pools = await listUserPools() || []
+  // const pools: any[] = [{Id: 'eu-central-1_imAhCdB3e', Name: 'organization-dev-909674-Aqihs0LW-MQLr9NW4oBT-'}]
 
   for (const pool of pools) {
     let poolId = pool.Id
@@ -280,8 +281,8 @@ const main = async () => {
 
     try {
       const poolUsers = await getAllUsers(poolId);
-      // console.log(poolUsers[0].UserStatus)
-      let isAllUserForceChangePassword = poolUsers > 0 && poolUsers?.every((poolUser => poolUser?.UserStatus === 'FORCE_CHANGE_PASSWORD'))
+      console.log(poolUsers)
+      let isAllUserForceChangePassword = poolUsers.length > 0 && poolUsers?.every((poolUser => poolUser?.UserStatus === 'FORCE_CHANGE_PASSWORD'))
       let isEmptyUsers = poolUsers?.length === 0
       if (isEmptyUsers) {
         pool.isPrepareToDelete = true
