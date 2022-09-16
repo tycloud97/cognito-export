@@ -21,3 +21,9 @@ $ docker cp cognito_export:./data ./data
 ```shell
 $ docker rm -f cognito_export && docker rmi jeffcortese/cognito-export:0.0.5
 ```
+
+Cognito User pool:
+- No users in pool
+- All users in pool never login before. (Required to change password)
+Cognito Identity Pool:
+- Link to Cognito user pool does not exist.
