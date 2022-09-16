@@ -281,10 +281,21 @@ const main = async () => {
     try {
       const poolUsers = await getAllUsers(poolId);
       // console.log(poolUsers[0].UserStatus)
-      pool.poolUsers = poolUsers;
-      let isAllForceChangePassword = poolUsers > 0 && poolUsers?.every((poolUser => poolUser?.UserStatus === 'FORCE_CHANGE_PASSWORD'))
-      pool.isPrepareToDelete = poolUsers?.length === 0 || isAllForceChangePassword
-      console.log(`Found ${poolUsers.length} users in pool ${poolId} ${poolName} isAllForceChangePassword=${isAllForceChangePassword}`,);
+      let isAllUserForceChangePassword = poolUsers > 0 && poolUsers?.every((poolUser => poolUser?.UserStatus === 'FORCE_CHANGE_PASSWORD'))
+      let isEmptyUsers = poolUsers?.length === 0
+      if (isEmptyUsers) {
+        pool.isPrepareToDelete = true
+        pool.reasonDelete = 'Is empty users'
+        pool.poolUsers = poolUsers;
+      }
+
+      if (isAllUserForceChangePassword) {
+        pool.isPrepareToDelete = true
+        pool.poolUsers = poolUsers;
+        pool.reasonDelete = 'Is all users force change password'
+      }
+
+      console.log(`Found ${poolUsers.length} users in pool ${poolId} ${poolName}`,);
     } catch (error) {
       console.error(`Error getting users from pool ${poolId} ${poolName}`);
       console.error(error);
@@ -302,40 +313,51 @@ const main = async () => {
 
   console.log(pools.length)
 
-  jsonfile.writeFileSync(`${dataSubfolder}/pools.json`, pools, { spaces: 2 });
+  // jsonfile.writeFileSync(`${dataSubfolder}/all-pools.json`, pools, { spaces: 2 });
 
-  jsonfile.writeFileSync(`${dataSubfolder}/deletes.json`, pools.filter(pool => pool?.isPrepareToDelete), { spaces: 2 });
+  jsonfile.writeFileSync(`${dataSubfolder}/delete-pools.json`, pools.filter(pool => pool?.isPrepareToDelete), { spaces: 2 });
 
 
   let realPools = pools.filter(pool => !pool?.isPrepareToDelete);
+
+  jsonfile.writeFileSync(`${dataSubfolder}/keep-pools.json`, realPools, { spaces: 2 });
+
   // let realPools = []
   const identityPools = await listIdentityPools() || []
   console.log(identityPools[0])
 
-  const isValidProviderNameUserPool = (item): boolean => {
-    if (item?.CognitoIdentityProviders.length === 1) {
-      const providerName: string = item.CognitoIdentityProviders[0]?.ProviderName
-      let userPoolMatchs = realPools.filter((pool) => providerName?.endsWith('/' + pool.Id))
-      if (providerName?.startsWith("cognito-idp") && userPoolMatchs?.length > 0) {
-        item.userPoolMatchs = userPoolMatchs
-        return true
-      }
-      console.log(`Delete ${item.IdentityPoolId} ${item.IdentityPoolName} because ${providerName} not exists`);
-      return false
-    } else {
-      console.debug("CognitoIdentityProviders > 1" + item?.IdentityPoolId)
-      return true
+  const findUserPoolByProviderName = (providerName: string) => {
+    let userPoolMatchs = realPools?.filter((pool) => providerName?.endsWith('/' + pool.Id))
+    if (providerName?.startsWith("cognito-idp") && userPoolMatchs?.length > 0) {
+      return userPoolMatchs
     }
+    return []
   }
 
   for (const identityPool of identityPools) {
     let response = await describeIdentityPool(cognitoIdentity, identityPool?.IdentityPoolId);
 
-    identityPool.isPrepareToDelete = response?.CognitoIdentityProviders?.length === 0 || !isValidProviderNameUserPool(response)
+    if (response?.CognitoIdentityProviders?.length === 0) {
+      identityPool.isPrepareToDelete = true
+      identityPool.reasonDelete = 'CognitoIdentityProviders empty'
+    } else if (response?.CognitoIdentityProviders.length === 1) {
+      let providerName = response.CognitoIdentityProviders?.[0]?.ProviderName
+      let userPoolMatchs = findUserPoolByProviderName(providerName)
+      if (userPoolMatchs?.length === 0) {
+        identityPool.isPrepareToDelete = true;
+        identityPool.reasonDelete = `ProviderName ${providerName} not match any user pool`;
+      }
+    } else {
+      console.debug("CognitoIdentityProviders > 1" + response)
+    }
+
+
+
+
   }
 
-  jsonfile.writeFileSync(`${dataSubfolder}/id-deletes.json`, identityPools.filter(pool => pool?.isPrepareToDelete), { spaces: 2 });
-  jsonfile.writeFileSync(`${dataSubfolder}/id-keeps.json`, identityPools.filter(pool => !pool?.isPrepareToDelete), { spaces: 2 });
+  jsonfile.writeFileSync(`${dataSubfolder}/delete-identity-pools.json`, identityPools.filter(pool => pool?.isPrepareToDelete), { spaces: 2 });
+  jsonfile.writeFileSync(`${dataSubfolder}/keep-identity-pools.json`, identityPools.filter(pool => !pool?.isPrepareToDelete), { spaces: 2 });
 
   console.log(identityPools?.length)
 
