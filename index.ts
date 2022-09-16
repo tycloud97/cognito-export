@@ -281,7 +281,6 @@ const main = async () => {
 
     try {
       const poolUsers = await getAllUsers(poolId);
-      console.log(poolUsers)
       let isAllUserForceChangePassword = poolUsers.length > 0 && poolUsers?.every((poolUser => poolUser?.UserStatus === 'FORCE_CHANGE_PASSWORD'))
       let isEmptyUsers = poolUsers?.length === 0
       if (isEmptyUsers) {
