@@ -1,96 +1,123 @@
-import { CognitoIdentityServiceProvider, DynamoDB } from 'aws-sdk';
-import { memoize, uniq } from 'lodash';
-import * as meow from 'meow';
-import * as jsonfile from 'jsonfile';
-import * as moniker from 'moniker';
+import { CognitoIdentity, CognitoIdentityServiceProvider, DynamoDB } from 'aws-sdk';
+import {
+  ListUserPoolsResponse,
+  PaginationKeyType, UserPoolDescriptionType
+} from 'aws-sdk/clients/cognitoidentityserviceprovider';
 import * as fs from 'fs';
+import * as jsonfile from 'jsonfile';
+import { memoize } from 'lodash';
+import * as meow from 'meow';
+import * as moniker from 'moniker';
 
 const cli = meow(`
     Usage
-      $ npm start -- export <options>  
+      $ npm start -- export
       
       AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
       can be specified in env variables or ~/.aws/credentials
-    Options
-      --region AWS region
-      --stage stage moniker (ex prod, dev, PR123)
 `);
 
 const accessKeyId = process.env.AWS_ACCESS_ID;
 const secretAccessKey = process.env.AWS_SECRET_KEY;
 const sessionToken = process.env.AWS_SESSION_TOKEN;
-const { stage, region } = cli.flags;
+const region = "eu-central-1"
 const awsConfig = {
-  region,
   accessKeyId,
   secretAccessKey,
-  sessionToken
+  sessionToken,
+  region
 };
 const dynamo = new DynamoDB(awsConfig);
 const cognito = new CognitoIdentityServiceProvider(awsConfig);
+const cognitoIdentity = new CognitoIdentity(awsConfig);
+
 const names = moniker.generator([moniker.adjective, moniker.noun]);
 
-const exportUsers = async (memberTableName: string, tenantTableName: string, domainTableName: string) => {
-  console.log(`Fetching all items from table ${memberTableName}...`);
-  const memberItems = await getAllItems(memberTableName);
-  const distinctPoolIds = uniq(memberItems.map(item => item.authPoolId.S));
-  console.log(`Found ${memberItems.length} items in table ${memberTableName} referencing ${distinctPoolIds.length} unique pools.`);
 
-  let pools = [];
-  let missingPools = [];
-  for (const poolId of distinctPoolIds) {
-    let poolName = '';
-    try {
-      const { UserPool: pool } = await cognito.describeUserPool({ UserPoolId: poolId }).promise();
-      poolName = pool.Name;
-    } catch (error) {
-      if (error.name === 'ResourceNotFoundException') {
-        missingPools.push(poolId);
-        continue;
-      }
+export const pagedAWSCall = async <TAPIResult, TData, TNextToken, TParams = {}>(
+  action: (params: TParams, nextToken?: TNextToken) => Promise<TAPIResult>,
+  params: TParams,
+  accessor: (result?: TAPIResult) => TData[],
+  getNextToken: (serviceResponse: TAPIResult, result: TData[]) => Promise<TNextToken | undefined>,
+): Promise<TData[]> => {
+
+
+  let result: TData[] = [];
+  let response: TAPIResult;
+  let nextToken: TNextToken = undefined;
+  do {
+    response = await action(params, nextToken);
+
+    if (response && accessor(response)) {
+      result = result.concat(accessor(response));
     }
+    nextToken = response ? await getNextToken(response, result) : undefined;
+  } while (!!nextToken);
 
-    console.log(`Fetching all users from pool ${poolName} (${poolId})...`);
-    try {
-      const poolUsers = await getAllUsers(poolId);
-      console.log(`Found ${poolUsers.length} users in pool ${poolName}.`);
-      pools = [...pools, { poolId, poolName, users: poolUsers.map(scrubPoolUser) }];
-      console.log(`Scrubbed user names and emails for pool ${poolName}`);
-    } catch (error) {
-      console.error(`Error getting users from pool ${poolId}`);
-      console.error(error);
-    }
-  }
-
-  if (missingPools.length) {
-    console.log(`There are members referencing ${missingPools.length} missing cognito pools.`);
-  }
-
-  console.log(`Fetching all items in table ${tenantTableName}...`);
-  const tenants = await getAllItems(tenantTableName);
-  console.log(`Found ${tenantTableName.length} tenants in table ${tenantTableName}`);
-
-  console.log(`Fetching all items in table ${domainTableName}...`);
-  const domains = await getAllItems(domainTableName);
-  console.log(`Found ${domains.length} domains in table ${domainTableName}`);
-
-  const dataFolder = './data';
-  const dataSubfolder = `${dataFolder}/${stage}_${region}`;
-  if (!fs.existsSync(dataFolder)) {
-    fs.mkdirSync(dataFolder);
-  }
-  if (!fs.existsSync(dataSubfolder)) {
-    fs.mkdirSync(dataSubfolder);
-  }
-
-  console.log(`Writing data to files at ./data/${dataSubfolder}`);
-  jsonfile.writeFileSync(`${dataSubfolder}/members.json`, memberItems.map(scrubMember), { spaces: 2 });
-  jsonfile.writeFileSync(`${dataSubfolder}/pools.json`, pools, { spaces: 2 });
-  jsonfile.writeFileSync(`${dataSubfolder}/tenants.json`, tenants, { spaces: 2 });
-  jsonfile.writeFileSync(`${dataSubfolder}/domains.json`, domains, { spaces: 2 });
-  jsonfile.writeFileSync(`${dataSubfolder}/missingPools.json`, missingPools, { spaces: 2 });
-  console.log(`Data wrote to ${dataSubfolder}`);
+  return result;
 };
+
+// const exportUsers = async (memberTableName: string, tenantTableName: string, domainTableName: string) => {
+//   console.log(`Fetching all items from table ${memberTableName}...`);
+//   const memberItems = await getAllItems(memberTableName);
+//   const distinctPoolIds = uniq(memberItems.map(item => item.authPoolId.S));
+//   console.log(`Found ${memberItems.length} items in table ${memberTableName} referencing ${distinctPoolIds.length} unique pools.`);
+
+//   let pools = [];
+//   let missingPools = [];
+//   for (const poolId of distinctPoolIds) {
+//     let poolName = '';
+//     try {
+//       const { UserPool: pool } = await cognito.describeUserPool({ UserPoolId: poolId }).promise();
+//       poolName = pool.Name;
+//     } catch (error) {
+//       if (error.name === 'ResourceNotFoundException') {
+//         missingPools.push(poolId);
+//         continue;
+//       }
+//     }
+
+//     console.log(`Fetching all users from pool ${poolName} (${poolId})...`);
+//     try {
+//       const poolUsers = await getAllUsers(poolId);
+//       console.log(`Found ${poolUsers.length} users in pool ${poolName}.`);
+//       pools = [...pools, { poolId, poolName, users: poolUsers.map(scrubPoolUser) }];
+//       console.log(`Scrubbed user names and emails for pool ${poolName}`);
+//     } catch (error) {
+//       console.error(`Error getting users from pool ${poolId}`);
+//       console.error(error);
+//     }
+//   }
+
+//   if (missingPools.length) {
+//     console.log(`There are members referencing ${missingPools.length} missing cognito pools.`);
+//   }
+
+//   console.log(`Fetching all items in table ${tenantTableName}...`);
+//   const tenants = await getAllItems(tenantTableName);
+//   console.log(`Found ${tenantTableName.length} tenants in table ${tenantTableName}`);
+
+//   console.log(`Fetching all items in table ${domainTableName}...`);
+//   const domains = await getAllItems(domainTableName);
+//   console.log(`Found ${domains.length} domains in table ${domainTableName}`);
+
+//   const dataFolder = './data';
+//   const dataSubfolder = `${dataFolder}/${stage}_${region}`;
+//   if (!fs.existsSync(dataFolder)) {
+//     fs.mkdirSync(dataFolder);
+//   }
+//   if (!fs.existsSync(dataSubfolder)) {
+//     fs.mkdirSync(dataSubfolder);
+//   }
+
+//   console.log(`Writing data to files at ./data/${dataSubfolder}`);
+//   jsonfile.writeFileSync(`${dataSubfolder}/members.json`, memberItems.map(scrubMember), { spaces: 2 });
+//   jsonfile.writeFileSync(`${dataSubfolder}/pools.json`, pools, { spaces: 2 });
+//   jsonfile.writeFileSync(`${dataSubfolder}/tenants.json`, tenants, { spaces: 2 });
+//   jsonfile.writeFileSync(`${dataSubfolder}/domains.json`, domains, { spaces: 2 });
+//   jsonfile.writeFileSync(`${dataSubfolder}/missingPools.json`, missingPools, { spaces: 2 });
+//   console.log(`Data wrote to ${dataSubfolder}`);
+// };
 
 const scrubbedEmailMemo = memoize(email => {
   const domain = email.substring(email.indexOf('@'));
@@ -153,14 +180,14 @@ const getAllItems = async (tableName: string, accumedMembers = [], startKey?): P
 };
 
 const getAllUsers = async (poolId: string, accumedUsers = [], includeCustomAttrs = true, pageToken?: string) => {
-  const customAttributes = ['given_name', 'family_name', 'custom:company', 'custom:title'];
+  // const customAttributes = ['given_name', 'family_name', 'custom:company', 'custom:title'];
   const params = {
-    'AttributesToGet': ['email'].concat(includeCustomAttrs ? customAttributes : []),
+    // 'AttributesToGet': ['email'].concat(includeCustomAttrs ? customAttributes : []),
     'UserPoolId': poolId
   };
 
   try {
-    await new Promise(res => setTimeout(res, 500));
+    // await new Promise(res => setTimeout(res, 500));
     const { Users: cognitoUsers, PaginationToken: nextPageToken } = await cognito.listUsers({ ...params, PaginationToken: pageToken }).promise();
     if (nextPageToken) {
       return getAllUsers(poolId, [...accumedUsers, ...cognitoUsers], includeCustomAttrs, nextPageToken);
@@ -178,15 +205,142 @@ const getAllUsers = async (poolId: string, accumedUsers = [], includeCustomAttrs
   }
 };
 
+let cachedUserPoolIds = []
+
+const listIdentityPools = async () => {
+  if (cachedUserPoolIds.length === 0) {
+    const result = await pagedAWSCall<CognitoIdentity.Types.ListIdentityPoolsResponse, any, any>(
+      async (params: CognitoIdentity.Types.ListIdentityPoolsInput, nextToken: PaginationKeyType) => {
+        // console.log('listUserPool.cognito.listUserPools', [{ params, NextToken: nextToken }]);
+        return await cognitoIdentity.listIdentityPools({
+          ...params,
+          NextToken: nextToken,
+        })
+          .promise();
+      },
+      {
+        MaxResults: 60
+      },
+      (response) => response.IdentityPools,
+      async (response) => {
+        return response.NextToken;
+      }
+    );
+
+    cachedUserPoolIds.push(...result);
+  }
+
+  return cachedUserPoolIds;
+}
+
+
+export const describeIdentityPool = (
+  cognitoIdentity: CognitoIdentity,
+  IdentityPoolId: string
+) => cognitoIdentity.describeIdentityPool({ IdentityPoolId }).promise();
+
+const listUserPools = async () => {
+  if (cachedUserPoolIds.length === 0) {
+    const result = await pagedAWSCall<ListUserPoolsResponse, UserPoolDescriptionType, PaginationKeyType>(
+      async (params: CognitoIdentityServiceProvider.Types.ListUserPoolsRequest, nextToken: PaginationKeyType) => {
+        // console.log('listUserPool.cognito.listUserPools', [{ params, NextToken: nextToken }]);
+        return await cognito
+          .listUserPools({
+            ...params,
+            NextToken: nextToken,
+          })
+          .promise();
+      },
+      {
+        MaxResults: 60
+      },
+      (response) => response.UserPools,
+      async (response) => {
+        return response.NextToken;
+      }
+    );
+
+    cachedUserPoolIds.push(...result);
+  }
+
+  return cachedUserPoolIds;
+}
+
+const main = async () => {
+  // List user pools
+  const pools = await listUserPools() || []
+
+  for (const pool of pools) {
+    let poolId = pool.Id
+
+    try {
+      const poolUsers = await getAllUsers(poolId);
+      // console.log(poolUsers[0].UserStatus)
+      pool.poolUsers = poolUsers;
+      pool.isPrepareToDelete = poolUsers?.length === 0 || poolUsers?.every((poolUser => poolUser?.UserStatus === 'FORCE_CHANGE_PASSWORD'))
+      console.log(`Found ${poolUsers.length} users in pool ${poolId}.`);
+    } catch (error) {
+      console.error(`Error getting users from pool ${poolId}`);
+      console.error(error);
+    }
+  }
+  // console.log(pools[0]?.Id)
+  // let poolId = 'eu-central-1_4YBRMDPVy'
+
+
+  const dataFolder = './data';
+  const dataSubfolder = `${dataFolder}/${region}`;
+  if (!fs.existsSync(dataFolder)) {
+    fs.mkdirSync(dataFolder);
+  }
+  if (!fs.existsSync(dataSubfolder)) {
+    fs.mkdirSync(dataSubfolder);
+  }
+
+  console.log(pools.length)
+
+  jsonfile.writeFileSync(`${dataSubfolder}/pools.json`, pools, { spaces: 2 });
+
+  jsonfile.writeFileSync(`${dataSubfolder}/deletes.json`, pools.filter(pool => pool?.isPrepareToDelete), { spaces: 2 });
+
+
+  let realPools = pools.filter(pool => !pool?.isPrepareToDelete);
+  // let realPools = []
+  const identityPools = await listIdentityPools() || []
+  identityPools.forEach(async identityPool => {
+    console.log(identityPool);
+    let response = await describeIdentityPool(cognitoIdentity, identityPool?.IdentityPoolId);
+    const isValidProviderNameUserPool = (item): boolean => {
+      if (item?.CognitoIdentityProviders.length === 1) {
+        const providerName: string = item.CognitoIdentityProviders[0]?.ProviderName
+        let userPoolMatchs = realPools.filter((pool) => providerName.endsWith(pool.Id))
+        if (providerName?.startsWith("cognito-idp") && userPoolMatchs?.length > 0) {
+          identityPool.userPoolMatchs = userPoolMatchs
+          return true
+        }
+      } else {
+        console.log("CognitoIdentityProviders > 1" + identityPool?.IdentityPoolId)
+        return true
+      }
+
+      return false
+    }
+    identityPool.isPrepareToDelete = response?.CognitoIdentityProviders?.length === 0 || !isValidProviderNameUserPool(response)
+    console.log(response)
+    return true
+  })
+
+  jsonfile.writeFileSync(`${dataSubfolder}/id-deletes.json`, identityPools.filter(pool => pool?.isPrepareToDelete), { spaces: 2 });
+  jsonfile.writeFileSync(`${dataSubfolder}/id-keeps.json`, identityPools.filter(pool => !pool?.isPrepareToDelete), { spaces: 2 });
+
+  console.log(identityPools?.length)
+
+}
 (async () => {
   try {
-    const memberTable = `crowsnest-authv3-${stage}.Member`;
-    const tenantTable = `crowsnest-authv3-${stage}.Tenant`;
-    const domainTable = `crowsnest-authv3-${stage}.Domain`;
-
     switch (cli.input[0]) {
       case 'export':
-        return await exportUsers(memberTable, tenantTable, domainTable);
+        return main()
       default:
         return cli.showHelp();
     }
@@ -195,3 +349,4 @@ const getAllUsers = async (poolId: string, accumedUsers = [], includeCustomAttrs
     console.error(error);
   }
 })();
+

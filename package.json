@@ -23,7 +23,7 @@
     "meow": "^5.0.0",
     "moniker": "^0.1.2",
     "ts-node": "^7.0.1",
-    "typescript": "^3.1.6"
+    "typescript": "^4.8.3"
   },
   "devDependencies": {
     "@types/jsonfile": "^4.0.1",
