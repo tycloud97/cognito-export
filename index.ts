@@ -364,6 +364,20 @@ const main = async () => {
   console.log('keepIdentityPools = ' + keepIdentityPools?.length)
 
 
+  for (const deletePool of deletePools) {
+
+    await cognito.deleteUserPool({
+      UserPoolId: deletePool.Id
+    }).promise()
+    console.log(`deleteUserPool ${deletePool.Id}`)
+  }
+
+  for (const deleteIdentityPool of deleteIdentityPools) {
+    await cognitoIdentity.deleteIdentityPool({
+      IdentityPoolId: deleteIdentityPool.IdentityPoolId
+    }).promise()
+    console.log(`deleteIdentityPool ${deleteIdentityPool.IdentityPoolId}`)
+  }
 }
 (async () => {
   try {
