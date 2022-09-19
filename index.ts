@@ -365,14 +365,22 @@ const main = async () => {
 
 
   for (const deletePool of deletePools) {
+    console.log(`prepareDeleteUserPool ${deletePool.Id}`)
+    const deleteUP = await cognito.describeUserPool({ UserPoolId: deletePool?.Id}).promise()
+    console.log(deleteUP.UserPool)
+    // await cognito.deleteUserPoolDomain({
+    //   UserPoolId: deletePool.Id
+    // }).promise()
 
     await cognito.deleteUserPool({
       UserPoolId: deletePool.Id
     }).promise()
+    
     console.log(`deleteUserPool ${deletePool.Id}`)
   }
 
   for (const deleteIdentityPool of deleteIdentityPools) {
+    console.log(`prepareDeleteIdentityPool ${deleteIdentityPool.IdentityPoolId}`)
     await cognitoIdentity.deleteIdentityPool({
       IdentityPoolId: deleteIdentityPool.IdentityPoolId
     }).promise()
