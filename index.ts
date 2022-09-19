@@ -368,10 +368,12 @@ const main = async () => {
     console.log(`prepareDeleteUserPool ${deletePool.Id}`)
     const deleteUP = await cognito.describeUserPool({ UserPoolId: deletePool?.Id}).promise()
     console.log(deleteUP.UserPool)
-    await cognito.deleteUserPoolDomain({
-      UserPoolId: deletePool.Id,
-      Domain: deleteUP?.UserPool?.Domain
-    }).promise()
+    if (deleteUP?.UserPool?.Domain) {
+      await cognito.deleteUserPoolDomain({
+        UserPoolId: deletePool.Id,
+        Domain: deleteUP?.UserPool?.Domain
+      }).promise()
+    }
 
     await cognito.deleteUserPool({
       UserPoolId: deletePool.Id
